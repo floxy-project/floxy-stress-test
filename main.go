@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -30,6 +31,16 @@ func main() {
 	log.Println("  2. Failpoint - failpoint-based injection")
 	log.Println("  3. ToxiProxy - network chaos for database")
 	log.Println()
+
+	repeatStr := os.Getenv("REPEAT")
+	repeat := 100
+	if repeatStr != "" {
+		var err error
+		repeat, err = strconv.Atoi(repeatStr)
+		if err != nil {
+			log.Fatalf("Failed to parse REPEAT environment variable: %v", err)
+		}
+	}
 
 	// Database connection configuration
 	// Can use direct connection or via ToxiProxy
@@ -224,9 +235,9 @@ func main() {
 		// Validators
 		Assert("recursion-depth", validators.RecursionDepthLimit(10)).
 		Assert("goroutine-leak", validators.GoroutineLimit(100)).
-		Assert("no-slow-iteration", validators.NoSlowIteration(15*time.Second)).
-		Assert("no-infinite-loops", validators.NoInfiniteLoop(20*time.Second)).
-		Repeat(50).
+		Assert("no-slow-iteration", validators.NoSlowIteration(5*time.Second)).
+		Assert("no-infinite-loops", validators.NoInfiniteLoop(10*time.Second)).
+		Repeat(repeat).
 		Build()
 
 	// Create executor with ContinueOnFailure policy
