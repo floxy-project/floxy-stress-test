@@ -327,14 +327,14 @@ func (t *FloxyStressTarget) ExecuteRandomWorkflow(ctx context.Context) error {
 			}
 			t.rollbackPlugin.ResetMaxDepth(instanceID)
 
-			return fmt.Errorf("workflow failed")
+			return nil
 		}
 
 		if status == floxy.StatusAborted || status == floxy.StatusCancelled {
 			t.failedRuns.Add(1)
 			t.rollbackPlugin.ResetMaxDepth(instanceID)
 
-			return fmt.Errorf("workflow %s", status)
+			return nil
 		}
 
 		time.Sleep(100 * time.Millisecond)

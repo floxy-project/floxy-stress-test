@@ -226,7 +226,7 @@ func main() {
 		Assert("goroutine-leak", validators.GoroutineLimit(100)).
 		Assert("no-slow-iteration", validators.NoSlowIteration(15*time.Second)).
 		Assert("no-infinite-loops", validators.NoInfiniteLoop(20*time.Second)).
-		RunFor(time.Minute).
+		Repeat(50).
 		Build()
 
 	// Create executor with ContinueOnFailure policy
