@@ -42,18 +42,52 @@ type FloxyStressTarget struct {
 	workers           []context.CancelFunc
 }
 
-func NewFloxyStressTarget(connString string) (*FloxyStressTarget, error) {
+func RegisterWorkflows(connString string) error {
 	ctx := context.Background()
 
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
+		return fmt.Errorf("failed to create pool: %w", err)
+	}
+	defer pool.Close()
+
+	engine := floxy.NewEngine(pool,
+		floxy.WithMissingHandlerCooldown(50*time.Millisecond),
+		floxy.WithQueueAgingEnabled(true),
+		floxy.WithQueueAgingRate(0.5),
+	)
+
+	target := &FloxyStressTarget{
+		pool:   pool,
+		engine: engine,
+	}
+
+	// Register workflows
+	if err := target.registerWorkflows(ctx); err != nil {
+		return fmt.Errorf("failed to register workflows: %w", err)
+	}
+
+	return nil
+}
+
+func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarget, error) {
+	ctx := context.Background()
+
+	poolMigrations, err := pgxpool.New(ctx, connString)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
 
-	if err := floxy.RunMigrations(ctx, pool); err != nil {
-		pool.Close()
+	if err := floxy.RunMigrations(ctx, poolMigrations); err != nil {
+		poolMigrations.Close()
 
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+	poolMigrations.Close()
+
+	pool, err := pgxpool.New(ctx, proxyConnString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
 
 	engine := floxy.NewEngine(pool,
@@ -79,13 +113,6 @@ func NewFloxyStressTarget(connString string) (*FloxyStressTarget, error) {
 
 	// Register handlers
 	target.registerHandlers()
-
-	// Register workflows
-	if err := target.registerWorkflows(ctx); err != nil {
-		pool.Close()
-
-		return nil, fmt.Errorf("failed to register workflows: %w", err)
-	}
 
 	return target, nil
 }
@@ -670,39 +697,28 @@ func main() {
 	useToxiProxy := os.Getenv("USE_TOXIPROXY") == "true"
 	toxiproxyHost := os.Getenv("TOXIPROXY_HOST")
 	if toxiproxyHost == "" {
-		toxiproxyHost = "localhost:6432"
+		toxiproxyHost = "localhost:8474"
 	}
-	toxiproxyURL := "http://" + toxiproxyHost
 
-	// Setup ToxiProxy for database connection chaos
+	// Setup ToxiProxy client for managing toxins (latency, bandwidth, timeout)
+	// Note: Proxy is already configured via toxiproxy.json, we just use it for connection
 	var toxiproxyClient *injectors.ToxiProxyClient
-	var toxiproxyManager *injectors.ToxiProxyManager
 	if useToxiProxy {
-		log.Println("[Setup] Initializing ToxiProxy for database connection chaos...")
+		log.Println("[Setup] Initializing ToxiProxy client for database connection chaos...")
 		toxiproxyClient = injectors.NewToxiProxyClient(toxiproxyHost)
-		toxiproxyManager = injectors.NewToxiProxyManager(toxiproxyClient)
-
-		// Create proxy for PostgreSQL
-		proxyConfig := injectors.ProxyConfig{
-			Name:     "postgres-proxy",
-			Listen:   toxiproxyURL,          // Proxy listens here
-			Upstream: dbHost + ":" + dbPort, // Actual PostgreSQL
-			Enabled:  true,
-		}
-
-		if err := toxiproxyManager.CreateProxy(proxyConfig); err != nil {
-			log.Printf("[Setup] Note: Proxy might already exist: %v", err)
-		} else {
-			// Use proxy connection string
-			connString = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
-				dbUser, dbPassword, toxiproxyHost, dbName)
-			log.Println("[Setup] Using ToxiProxy for database connections")
-		}
+		log.Printf("[Setup] Using ToxiProxy for database connections: %s:%s (proxy configured via toxiproxy.json)", dbHost, dbPort)
+		connString = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", dbUser, dbPassword, "floxy-stress-toxiproxy", 6432, dbName)
+	} else {
+		log.Printf("[Setup] Connecting directly to PostgreSQL: %s:%s", dbHost, dbPort)
 	}
 
-	// Create Floxy target
+	// Create a Floxy target
 	log.Println("[Setup] Creating Floxy target...")
-	floxyTarget, err := NewFloxyStressTarget(connString)
+	if err := RegisterWorkflows(directConnString); err != nil {
+		log.Fatalf("Failed to register workflows: %v", err)
+	}
+
+	floxyTarget, err := NewFloxyStressTarget(directConnString, connString)
 	if err != nil {
 		log.Fatalf("Failed to create Floxy target: %v", err)
 	}
@@ -791,9 +807,10 @@ func main() {
 
 	if useToxiProxy && toxiproxyClient != nil {
 		// Latency for database calls
+		// Proxy name "pg" matches the name in toxiproxy.json
 		latencyInjector = injectors.ToxiProxyLatency(
 			toxiproxyClient,
-			"postgres-proxy",
+			"pg",
 			100*time.Millisecond, // 100ms latency
 			20*time.Millisecond,  // ±20ms jitter
 		)
@@ -801,14 +818,14 @@ func main() {
 		// Bandwidth limiting (simulates slow network)
 		bandwidthInjector = injectors.ToxiProxyBandwidth(
 			toxiproxyClient,
-			"postgres-proxy",
+			"pg",
 			500, // 500 KB/s limit
 		)
 
 		// Connection timeouts
 		timeoutInjector = injectors.ToxiProxyTimeout(
 			toxiproxyClient,
-			"postgres-proxy",
+			"pg",
 			2*time.Second, // 2 second timeout
 		)
 	}
@@ -871,11 +888,8 @@ func main() {
 
 	// Stop injectors
 	log.Println("[Cleanup] Stopping injectors...")
-	if useToxiProxy && toxiproxyManager != nil {
-		if err := toxiproxyManager.DeleteProxy("postgres-proxy"); err != nil {
-			log.Printf("[Cleanup] Error removing proxy: %v", err)
-		}
-	}
+	// Note: ToxiProxy proxy is managed via toxiproxy.json configuration file,
+	// so we don't need to delete it programmatically
 
 	// Wait a bit for cleanup
 	time.Sleep(2 * time.Second)

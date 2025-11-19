@@ -42,7 +42,7 @@ services:
     build:
       context: .
     container_name: floxy-stress-tester
-    restart: always
+    restart: no
     environment:
       DB_HOST: floxy-stress-pg
       DB_PORT: 5432
@@ -52,6 +52,8 @@ services:
       USE_TOXIPROXY: true
       TOXIPROXY_HOST: floxy-stress-toxiproxy:8474
     depends_on:
+      floxy-stress-toxiproxy:
+        condition: service_started
       floxy-stress-pg:
         condition: service_healthy
 
