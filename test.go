@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rom8726/chaoskit"
 	"github.com/rom8726/floxy"
@@ -87,22 +88,6 @@ func (t *FloxyStressTarget) Name() string {
 }
 
 func (t *FloxyStressTarget) Setup(ctx context.Context) error {
-	log.Println("[Floxy] Setting up stress test target...")
-
-	// Start worker pool
-	workerCount := 5
-	t.mu.Lock()
-	t.workers = make([]context.CancelFunc, workerCount)
-	for i := 0; i < workerCount; i++ {
-		workerCtx, cancel := context.WithCancel(ctx)
-		t.workers[i] = cancel
-
-		go t.worker(workerCtx, fmt.Sprintf("worker-%d", i))
-	}
-	t.mu.Unlock()
-
-	log.Printf("[Floxy] Started %d workers", workerCount)
-
 	return nil
 }
 
@@ -132,21 +117,20 @@ func (t *FloxyStressTarget) Teardown(ctx context.Context) error {
 	return nil
 }
 
-func (t *FloxyStressTarget) worker(ctx context.Context, workerID string) {
+func (t *FloxyStressTarget) worker(ctx context.Context, workerID string) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 			empty, err := t.engine.ExecuteNext(ctx, workerID)
 			if err != nil {
 				log.Printf("[Floxy] Worker %s error: %v", workerID, err)
-				time.Sleep(100 * time.Millisecond)
 
-				continue
+				return fmt.Errorf("worker %s error: %w", workerID, err)
 			}
 			if empty {
-				time.Sleep(50 * time.Millisecond)
+				return nil
 			}
 		}
 	}
@@ -295,52 +279,69 @@ func (t *FloxyStressTarget) ExecuteRandomWorkflow(ctx context.Context) error {
 	// Track rollback depth for this instance
 	chaoskit.RecordRecursionDepth(ctx, 0)
 
-	// Wait for completion with timeout
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		status, err := t.engine.GetStatus(ctx, instanceID)
-		if err != nil {
-			return fmt.Errorf("failed to get status: %w", err)
-		}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	defer wg.Wait()
 
-		// Check rollback depth
-		depth := t.rollbackPlugin.GetMaxDepth(instanceID)
-		if depth > 0 {
-			chaoskit.RecordRecursionDepth(ctx, depth)
-			currentMax := t.maxRollbackDepth.Load()
-			if int32(depth) > currentMax {
-				t.maxRollbackDepth.Store(int32(depth))
+	ctxMonitor, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func(ctx context.Context) {
+		defer wg.Done()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
 			}
-		}
 
-		if status == floxy.StatusCompleted {
-			t.successfulRuns.Add(1)
-			t.rollbackPlugin.ResetMaxDepth(instanceID)
+			status, err := t.engine.GetStatus(context.Background(), instanceID)
+			if err != nil {
+				log.Printf("failed to get status: %s", err)
 
-			return nil
-		}
+				continue
+			}
 
-		if status == floxy.StatusFailed {
-			t.failedRuns.Add(1)
+			// Check rollback depth
+			depth := t.rollbackPlugin.GetMaxDepth(instanceID)
 			if depth > 0 {
-				t.rollbackCount.Add(1)
+				chaoskit.RecordRecursionDepth(ctx, depth)
+				currentMax := t.maxRollbackDepth.Load()
+				if int32(depth) > currentMax {
+					t.maxRollbackDepth.Store(int32(depth))
+				}
 			}
-			t.rollbackPlugin.ResetMaxDepth(instanceID)
 
-			return nil
+			if status == floxy.StatusCompleted {
+				t.successfulRuns.Add(1)
+				t.rollbackPlugin.ResetMaxDepth(instanceID)
+
+				return
+			}
+
+			if status == floxy.StatusFailed {
+				t.failedRuns.Add(1)
+				if depth > 0 {
+					t.rollbackCount.Add(1)
+				}
+				t.rollbackPlugin.ResetMaxDepth(instanceID)
+
+				return
+			}
+
+			if status == floxy.StatusAborted || status == floxy.StatusCancelled {
+				t.failedRuns.Add(1)
+				t.rollbackPlugin.ResetMaxDepth(instanceID)
+
+				return
+			}
+
+			time.Sleep(100 * time.Millisecond)
 		}
+	}(ctxMonitor)
 
-		if status == floxy.StatusAborted || status == floxy.StatusCancelled {
-			t.failedRuns.Add(1)
-			t.rollbackPlugin.ResetMaxDepth(instanceID)
-
-			return nil
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return fmt.Errorf("workflow timeout")
+	return t.worker(ctx, uuid.NewString())
 }
 
 func (t *FloxyStressTarget) GetStats() map[string]interface{} {
@@ -393,12 +394,9 @@ func (h *PaymentHandler) Execute(
 }
 
 // InventoryHandler processes inventory reservation
-// To enable gofail, uncomment failpoint calls and build with: go build -tags failpoint -gcflags=all=-l
+// To enable failpoint, uncomment failpoint calls and build with: go build -tags failpoint -gcflags=all=-l
 var processInventoryHandler = func(ctx context.Context, order map[string]any) error {
-	// Gofail failpoint (requires build with -tags failpoint)
-	// Uncomment to enable:
-	// import "github.com/pingcap/failpoint"
-	// failpoint.Inject("inventory-handler-panic", func() { panic("gofail: inventory handler panic") })
+	// failpoint requires build with -tags failpoint
 
 	time.Sleep(time.Millisecond * time.Duration(5+rand.Intn(15)))
 
@@ -432,13 +430,8 @@ func (h *InventoryHandler) Execute(
 }
 
 // ShippingHandler processes shipping
-// To enable gofail, uncomment failpoint calls and build with: go build -tags failpoint -gcflags=all=-l
+// To enable failpoint, uncomment failpoint calls and build with: go build -tags failpoint -gcflags=all=-l
 var processShippingHandler = func(ctx context.Context, order map[string]any) error {
-	// Gofail failpoint (requires build with -tags failpoint)
-	// Uncomment to enable:
-	// import "github.com/pingcap/failpoint"
-	// failpoint.Inject("shipping-handler-panic", func() { panic("gofail: shipping handler panic") })
-
 	time.Sleep(time.Millisecond * time.Duration(10+rand.Intn(20)))
 
 	if shouldFail, ok := order["should_fail"].(bool); ok && shouldFail && rand.Float64() < 0.1 {

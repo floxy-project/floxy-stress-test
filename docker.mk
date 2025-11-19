@@ -7,7 +7,7 @@ docker-up: ## Up the environment in docker compose
 	${_COMPOSE} up
 
 docker-down: ## Down the environment in docker compose
-	${_COMPOSE} down --remove-orphans
+	${_COMPOSE} down -v --remove-orphans
 
 docker-clean: ## Down the environment in docker compose with images cleanup
 	${_COMPOSE} down --remove-orphans -v --rmi all
