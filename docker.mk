@@ -4,7 +4,7 @@ docker-build: ## Build stress test
 	${_COMPOSE} build floxy-stress-tester
 
 docker-up: ## Up the environment in docker compose
-	${_COMPOSE} up -d
+	${_COMPOSE} up
 
 docker-down: ## Down the environment in docker compose
 	${_COMPOSE} down --remove-orphans
