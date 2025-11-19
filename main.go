@@ -91,20 +91,20 @@ func main() {
 	defer cancel()
 
 	// Statistics reporter
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				stats := floxyTarget.GetStats()
-				log.Printf("[Stats] %+v", stats)
-			}
-		}
-	}()
+	//go func() {
+	//	ticker := time.NewTicker(10 * time.Second)
+	//	defer ticker.Stop()
+	//
+	//	for {
+	//		select {
+	//		case <-ctx.Done():
+	//			return
+	//		case <-ticker.C:
+	//			stats := floxyTarget.GetStats()
+	//			log.Printf("[Stats] %+v", stats)
+	//		}
+	//	}
+	//}()
 
 	// Build injectors
 	log.Println("[Setup] Creating chaos injectors...")
@@ -225,8 +225,8 @@ func main() {
 		Assert("recursion-depth", validators.RecursionDepthLimit(10)).
 		Assert("goroutine-leak", validators.GoroutineLimit(100)).
 		Assert("no-slow-iteration", validators.NoSlowIteration(15*time.Second)).
-		//Assert("no-infinite-loops", validators.NoInfiniteLoop(time.Minute)).
-		RunFor(30 * time.Second). // Run for 30 seconds
+		Assert("no-infinite-loops", validators.NoInfiniteLoop(20*time.Second)).
+		RunFor(30 * time.Second).
 		Build()
 
 	// Create executor with ContinueOnFailure policy
@@ -234,11 +234,11 @@ func main() {
 		chaoskit.WithFailurePolicy(chaoskit.ContinueOnFailure),
 	)
 
-	// Run in background
+	// Run in the background
 	log.Println("[Main] Starting chaos scenario...")
 
 	go func() {
-		// Wait for signal
+		// Wait for a signal
 		<-sigCh
 		log.Println("\n[Main] Shutting down...")
 		cancel()
@@ -254,7 +254,7 @@ func main() {
 	// Wait a bit for cleanup
 	time.Sleep(2 * time.Second)
 
-	// Get verdict and generate report
+	// Get verdict and generate a report
 	thresholds := chaoskit.DefaultThresholds()
 	report, err := executor.Reporter().GetVerdict(thresholds)
 	if err != nil {

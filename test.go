@@ -32,34 +32,6 @@ type FloxyStressTarget struct {
 	workers           []context.CancelFunc
 }
 
-func RegisterWorkflows(connString string) error {
-	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, connString)
-	if err != nil {
-		return fmt.Errorf("failed to create pool: %w", err)
-	}
-	defer pool.Close()
-
-	engine := floxy.NewEngine(pool,
-		floxy.WithMissingHandlerCooldown(50*time.Millisecond),
-		floxy.WithQueueAgingEnabled(true),
-		floxy.WithQueueAgingRate(0.5),
-	)
-
-	target := &FloxyStressTarget{
-		pool:   pool,
-		engine: engine,
-	}
-
-	// Register workflows
-	if err := target.registerWorkflows(ctx); err != nil {
-		return fmt.Errorf("failed to register workflows: %w", err)
-	}
-
-	return nil
-}
-
 func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarget, error) {
 	ctx := context.Background()
 
@@ -148,14 +120,14 @@ func (t *FloxyStressTarget) Teardown(ctx context.Context) error {
 	time.Sleep(500 * time.Millisecond)
 
 	// Shutdown engine
-	t.engine.Shutdown()
+	_ = t.engine.Shutdown()
 
 	// Close pool
 	t.pool.Close()
 
 	// Print final stats
 	stats := t.GetStats()
-	log.Printf("[Floxy] Final stats: %+v", stats)
+	log.Printf("\n\n\n[Floxy] Final stats: %+v", stats)
 
 	return nil
 }
@@ -383,17 +355,9 @@ func (t *FloxyStressTarget) GetStats() map[string]interface{} {
 }
 
 // Step handlers implementation
-// These handlers are targets for monkey patching and gofail injection
 
 // PaymentHandler processes payment
-// Can be patched with monkey patching injectors
-// To enable gofail, uncomment failpoint calls and build with: go build -tags failpoint -gcflags=all=-l
 var processPaymentHandler = func(ctx context.Context, order map[string]any) error {
-	// Gofail failpoint (requires build with -tags failpoint)
-	// Uncomment to enable:
-	// import "github.com/pingcap/failpoint"
-	// failpoint.Inject("payment-handler-panic", func() { panic("gofail: payment handler panic") })
-
 	// Simulate processing time
 	time.Sleep(time.Millisecond * time.Duration(10+rand.Intn(20)))
 
@@ -420,7 +384,7 @@ func (h *PaymentHandler) Execute(
 		return nil, err
 	}
 
-	// Call a processable function (can be monkey patched)
+	// Call a processable function
 	if err := processPaymentHandler(ctx, order); err != nil {
 		return nil, err
 	}
@@ -643,7 +607,34 @@ func (c *FloxyMetricsCollector) GetStats() map[string]interface{} {
 	}
 }
 
-// ChaosKit integration
+func RegisterWorkflows(connString string) error {
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, connString)
+	if err != nil {
+		return fmt.Errorf("failed to create pool: %w", err)
+	}
+	defer pool.Close()
+
+	engine := floxy.NewEngine(pool,
+		floxy.WithMissingHandlerCooldown(50*time.Millisecond),
+		floxy.WithQueueAgingEnabled(true),
+		floxy.WithQueueAgingRate(0.5),
+	)
+
+	target := &FloxyStressTarget{
+		pool:   pool,
+		engine: engine,
+	}
+
+	// Register workflows
+	if err := target.registerWorkflows(ctx); err != nil {
+		return fmt.Errorf("failed to register workflows: %w", err)
+	}
+
+	return nil
+}
+
 func RunFloxyWorkflow(ctx context.Context, target chaoskit.Target) error {
 	floxyTarget, ok := target.(*FloxyStressTarget)
 	if !ok {
