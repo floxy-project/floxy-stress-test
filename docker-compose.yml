@@ -40,7 +40,7 @@ services:
 
   floxy-stress-tester:
     build:
-      context: ../
+      context: .
     container_name: floxy-stress-test
     restart: always
     environment:

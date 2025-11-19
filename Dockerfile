@@ -12,7 +12,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o stress-test \
-    ./cmd/stress-test
+    .
 
 FROM alpine:latest
 
@@ -23,7 +23,7 @@ WORKDIR /app
 COPY --from=builder /build/stress-test .
 
 RUN adduser -D -u 1000 tester && \
-    chown -R tester:tester /stress-test
+    chown -R tester:tester /app/stress-test
 
 USER tester
 
