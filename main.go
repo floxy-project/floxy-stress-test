@@ -237,6 +237,10 @@ func main() {
 		Assert("goroutine-leak", validators.GoroutineLimit(100)).
 		Assert("no-slow-iteration", validators.NoSlowIteration(5*time.Second)).
 		Assert("no-infinite-loops", validators.NoInfiniteLoop(10*time.Second)).
+		// Database consistency validators
+		Assert("queue-empty", NewQueueEmptyValidator()).
+		Assert("completed-instances-consistency", NewCompletedInstancesValidator()).
+		Assert("failed-instances-consistency", NewFailedInstancesValidator()).
 		Repeat(repeat).
 		Build()
 
