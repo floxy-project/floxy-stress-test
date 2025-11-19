@@ -152,7 +152,7 @@ func main() {
 
 	monkeyDelayInjector := injectors.MonkeyPatchDelay(monkeyDelayTargets)
 
-	// 2. Gofail injector (requires build with -tags failpoint)
+	// 2. Failpoint injector (requires build with -tags failpoint)
 	failpointNames := []string{
 		"payment-handler-panic",
 		"inventory-handler-panic",
@@ -225,6 +225,7 @@ func main() {
 		Assert("recursion-depth", validators.RecursionDepthLimit(10)).
 		Assert("goroutine-leak", validators.GoroutineLimit(100)).
 		Assert("no-slow-iteration", validators.NoSlowIteration(15*time.Second)).
+		//Assert("no-infinite-loops", validators.NoInfiniteLoop(time.Minute)).
 		RunFor(30 * time.Second). // Run for 30 seconds
 		Build()
 
@@ -235,21 +236,20 @@ func main() {
 
 	// Run in background
 	log.Println("[Main] Starting chaos scenario...")
+
 	go func() {
-		if err := executor.Run(ctx, scenario); err != nil {
-			log.Printf("Scenario error: %v", err)
-		}
+		// Wait for signal
+		<-sigCh
+		log.Println("\n[Main] Shutting down...")
+		cancel()
 	}()
 
-	// Wait for signal
-	<-sigCh
-	log.Println("\n[Main] Shutting down...")
-	cancel()
+	if err := executor.Run(ctx, scenario); err != nil {
+		log.Printf("Scenario error: %v", err)
+	}
 
 	// Stop injectors
 	log.Println("[Cleanup] Stopping injectors...")
-	// Note: ToxiProxy proxy is managed via toxiproxy.json configuration file,
-	// so we don't need to delete it programmatically
 
 	// Wait a bit for cleanup
 	time.Sleep(2 * time.Second)
@@ -274,6 +274,9 @@ func main() {
 	log.Printf("Rollback count: %d", stats["rollback_count"])
 	log.Printf("Max rollback depth: %d", stats["max_rollback_depth"])
 	log.Printf("Metrics: %+v", stats["metrics"])
+
+	log.Println("\n=== Final Verdict ===")
+	log.Printf(report.Verdict.String())
 
 	// Exit with verdict code
 	//os.Exit(report.Verdict.ExitCode())
@@ -316,7 +319,7 @@ func createProxyIfNotExists(toxiproxyAPIHost string, proxyName string, listenAdd
 	if err != nil {
 		return fmt.Errorf("failed to create proxy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
