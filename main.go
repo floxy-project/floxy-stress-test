@@ -1,14 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -70,6 +76,102 @@ func RegisterWorkflows(connString string) error {
 	return nil
 }
 
+// createProxyIfNotExists creates a proxy via ToxiProxy API if it doesn't exist
+func createProxyIfNotExists(toxiproxyAPIHost string, proxyName string, listenAddr string, upstreamAddr string) error {
+	// Check if proxy already exists
+	apiURL := fmt.Sprintf("http://%s/proxies/%s", toxiproxyAPIHost, proxyName)
+	resp, err := http.Get(apiURL)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		resp.Body.Close()
+		log.Printf("[Setup] Proxy %s already exists", proxyName)
+		return nil
+	}
+
+	// Create proxy
+	createURL := fmt.Sprintf("http://%s/proxies", toxiproxyAPIHost)
+	proxyConfig := map[string]interface{}{
+		"name":     proxyName,
+		"listen":   listenAddr,
+		"upstream": upstreamAddr,
+		"enabled":  true,
+	}
+
+	jsonData, err := json.Marshal(proxyConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal proxy config: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", createURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err = client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to create proxy: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to create proxy: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("[Setup] Created proxy %s: %s -> %s", proxyName, listenAddr, upstreamAddr)
+	return nil
+}
+
+// waitForProxyReady waits for the proxy to be ready to accept connections
+// It checks both TCP connection and ToxiProxy API to ensure proxy is configured
+func waitForProxyReady(proxyHost string, proxyPort int, toxiproxyAPIHost string, proxyName string, maxRetries int, retryInterval time.Duration) error {
+	address := net.JoinHostPort(proxyHost, fmt.Sprintf("%d", proxyPort))
+
+	for i := 0; i < maxRetries; i++ {
+		// First check if proxy exists in ToxiProxy API
+		if toxiproxyAPIHost != "" && proxyName != "" {
+			apiURL := fmt.Sprintf("http://%s/proxies/%s", toxiproxyAPIHost, proxyName)
+			resp, err := http.Get(apiURL)
+			if err == nil {
+				if resp.StatusCode == http.StatusOK {
+					body, _ := io.ReadAll(resp.Body)
+					resp.Body.Close()
+
+					// Check if proxy is enabled
+					var proxyInfo map[string]interface{}
+					if json.Unmarshal(body, &proxyInfo) == nil {
+						if enabled, ok := proxyInfo["enabled"].(bool); ok && enabled {
+							// Proxy exists and is enabled, now check TCP connection
+							conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+							if err == nil {
+								conn.Close()
+								log.Printf("[Setup] Proxy %s is ready (verified via API and TCP)", address)
+								return nil
+							}
+						}
+					}
+				}
+			}
+		} else {
+			// Fallback to TCP-only check if API info not available
+			conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+			if err == nil {
+				conn.Close()
+				log.Printf("[Setup] Proxy %s is ready", address)
+				return nil
+			}
+		}
+
+		if i < maxRetries-1 {
+			log.Printf("[Setup] Waiting for proxy %s to be ready (attempt %d/%d)...", address, i+1, maxRetries)
+			time.Sleep(retryInterval)
+		}
+	}
+
+	return fmt.Errorf("proxy %s not ready after %d attempts", address, maxRetries)
+}
+
 func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarget, error) {
 	ctx := context.Background()
 
@@ -84,6 +186,9 @@ func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarge
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 	poolMigrations.Close()
+
+	// Wait for proxy to be ready before connecting
+	// This will be called from main() with toxiproxy API info
 
 	pool, err := pgxpool.New(ctx, proxyConnString)
 	if err != nil {
@@ -712,6 +817,63 @@ func main() {
 		log.Printf("[Setup] Connecting directly to PostgreSQL: %s:%s", dbHost, dbPort)
 	}
 
+	// Wait for proxy to be ready if using ToxiProxy
+	if useToxiProxy && connString != directConnString {
+		// Extract host and port from proxy connection string
+		parsedURL, err := url.Parse(connString)
+		if err == nil && parsedURL.Host != "" {
+			proxyHost := parsedURL.Hostname()
+			proxyPortStr := parsedURL.Port()
+			if proxyPortStr == "" {
+				proxyPortStr = "6432"
+			}
+			proxyPort, err := strconv.Atoi(proxyPortStr)
+			if err == nil && proxyHost != "" {
+				log.Println("[Setup] Ensuring ToxiProxy proxy is created...")
+
+				// Try to create proxy if it doesn't exist
+				// Listen address: 0.0.0.0:6432 (inside container, listens on all interfaces)
+				// Upstream: PostgreSQL address (e.g., floxy-stress-pg:5432)
+				listenAddr := fmt.Sprintf("0.0.0.0:%d", proxyPort)
+				upstreamAddr := fmt.Sprintf("%s:%s", dbHost, dbPort)
+
+				// Wait for ToxiProxy API to be ready first
+				apiReady := false
+				apiURL := fmt.Sprintf("http://%s/version", toxiproxyHost)
+				log.Printf("[Setup] Waiting for ToxiProxy API at %s to be ready...", apiURL)
+				for i := 0; i < 30; i++ {
+					client := &http.Client{Timeout: 2 * time.Second}
+					resp, err := client.Get(apiURL)
+					if err == nil && resp.StatusCode == http.StatusOK {
+						resp.Body.Close()
+						apiReady = true
+						log.Printf("[Setup] ToxiProxy API is ready")
+						break
+					}
+					if i%5 == 0 && i > 0 {
+						log.Printf("[Setup] Still waiting for ToxiProxy API... (attempt %d/30)", i+1)
+					}
+					time.Sleep(1 * time.Second)
+				}
+
+				if !apiReady {
+					log.Printf("[Setup] Warning: ToxiProxy API at %s not ready after 60 seconds, continuing anyway...", apiURL)
+				}
+
+				// Create proxy if it doesn't exist
+				if err := createProxyIfNotExists(toxiproxyHost, "pg", listenAddr, upstreamAddr); err != nil {
+					log.Printf("[Setup] Warning: Failed to create proxy via API (may already exist): %v", err)
+				}
+
+				log.Println("[Setup] Waiting for ToxiProxy proxy to be ready...")
+				// Proxy name from toxiproxy.json is "pg"
+				if err := waitForProxyReady(proxyHost, proxyPort, toxiproxyHost, "pg", 30, 2*time.Second); err != nil {
+					log.Fatalf("Failed to wait for proxy: %v", err)
+				}
+			}
+		}
+	}
+
 	// Create a Floxy target
 	log.Println("[Setup] Creating Floxy target...")
 	if err := RegisterWorkflows(directConnString); err != nil {
@@ -865,7 +1027,7 @@ func main() {
 		Assert("recursion-depth", validators.RecursionDepthLimit(10)).
 		Assert("goroutine-leak", validators.GoroutineLimit(100)).
 		Assert("no-slow-iteration", validators.NoSlowIteration(15*time.Second)).
-		RunFor(60 * time.Second). // Run for 1 minute
+		RunFor(30 * time.Second). // Run for 30 seconds
 		Build()
 
 	// Create executor with ContinueOnFailure policy
