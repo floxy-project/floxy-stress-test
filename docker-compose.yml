@@ -41,7 +41,7 @@ services:
   floxy-stress-tester:
     build:
       context: .
-    container_name: floxy-stress-test
+    container_name: floxy-stress-tester
     restart: always
     environment:
       DB_HOST: floxy-stress-pg
