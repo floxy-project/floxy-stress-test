@@ -1,5 +1,8 @@
 _COMPOSE=docker compose -f docker-compose.yml --project-name ${NAMESPACE}
 
+docker-build: ## Build stress test
+	${_COMPOSE} build floxy-stress-tester
+
 docker-up: ## Up the environment in docker compose
 	${_COMPOSE} up -d
 
