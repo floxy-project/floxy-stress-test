@@ -39,33 +39,31 @@ It tests various workflow patterns under chaos conditions to validate:
 
 ### Chaos Injection Methods
 
-This example demonstrates three advanced chaos injection techniques:
+This example demonstrates chaos injection techniques:
 
-1. **Monkey Patching** - Runtime function patching
-   - Panic injection in handlers (5% probability)
-   - Delay injection in handlers (15-20% probability)
-   - No code modification required (functions must be variables, not methods)
-   - Requires `-gcflags=all=-l` build flag
-   - Functions must be passed as pointers: `&processPaymentHandler`
+1. **Context Injections** (Always Active)
+   - Random delay injection (20-100ms, 15% probability)
+   - Panic injection (15% probability)
+   - Error injection (15% probability)
+   - No build flags required
 
-2. **Gofail** - Failpoint-based injection
+2. **Failpoint-based injection** (Optional)
    - Panic injection via failpoints
    - Requires build with `-tags failpoint`
    - Requires instrumenting code with failpoint.Inject
    - 3% probability per failpoint
 
-3. **ToxiProxy** - Network chaos for database
+3. **ToxiProxy** (Optional)
+   - Network chaos for database connections
    - Latency injection (100ms ± 20ms)
    - Bandwidth limiting (500 KB/s)
    - Connection timeouts (2 seconds)
-   - Optional: Enable with `USE_TOXIPROXY=true`
-
-**Note**: Monkey patching is always active. Gofail and ToxiProxy are optional.
+   - Enable with `USE_TOXIPROXY=true` in docker-compose.yml
 
 ### Validation
 
-- **Recursion Depth**: Ensures rollback depth stays below 50
-- **Goroutine Leak**: Monitors goroutine count (limit: 500)
+- **Recursion Depth**: Ensures rollback depth stays below 10
+- **Goroutine Leak**: Monitors goroutine count (limit: 100)
 - **Infinite Loop**: Detects stuck workflows (timeout: 15s)
 
 ### Metrics Collection
@@ -76,84 +74,134 @@ Integrated Floxy plugins:
 
 ## Prerequisites
 
-### Required
+- Docker and Docker Compose
+- Make (for convenience commands)
 
-- PostgreSQL database running on `localhost:5435`
-  - Database: `floxy`
-  - User: `floxy`
-  - Password: `password`
+## Quick Start
 
-Start PostgreSQL using Docker:
+### Using Make Commands
 
 ```bash
-docker run -d \
-  --name floxy-postgres \
-  -e POSTGRES_DB=floxy \
-  -e POSTGRES_USER=floxy \
-  -e POSTGRES_PASSWORD=password \
-  -p 5435:5432 \
-  postgres:15
+# Build the stress test application
+make docker-build
+
+# Start all services (PostgreSQL, ToxiProxy, Stress Tester, UI)
+make docker-up
+
+# Stop all services
+make docker-down
+
+# Clean up everything including volumes
+make docker-clean
+
+# Restart services
+make docker-restart
 ```
 
-### Optional
-
-**ToxiProxy** (for database network chaos):
-```bash
-# Install ToxiProxy
-brew install toxiproxy  # macOS
-# Or download from: https://github.com/Shopify/toxiproxy/releases
-
-# Start ToxiProxy server
-toxiproxy-server
-```
-
-**Gofail** (for failpoint-based injection):
-- Already included in dependencies
-- Requires build with `-tags failpoint`
-- Requires uncommenting failpoint.Inject calls in handlers
-
-## Running the Test
-
-### Basic Run (Monkey Patching Only)
+### Manual Docker Compose
 
 ```bash
-cd examples/floxy_stress_test
+# Build
+docker compose build floxy-stress-tester
 
-# Run with monkey patching (requires -gcflags=all=-l)
-go run -gcflags=all=-l main.go
+# Start all services
+docker compose up
+
+# Stop services
+docker compose down
 ```
 
-### With ToxiProxy (Database Network Chaos)
+## Architecture
 
-```bash
-# Start ToxiProxy server (in separate terminal)
-toxiproxy-server
+The test environment consists of:
 
-# Run with ToxiProxy enabled
-USE_TOXIPROXY=true go run -gcflags=all=-l main.go
+1. **floxy-stress-pg**: PostgreSQL 17 database
+   - Port: 5432
+   - Database: `floxy`
+   - User: `floxy` / Password: `password`
+
+2. **floxy-stress-toxiproxy**: ToxiProxy server for network chaos
+   - API Port: 8474
+   - Proxy Port: 6432
+   - Automatically creates proxy from `toxiproxy.json` config
+
+3. **floxy-stress-tester**: Stress test application
+   - Runs workflows continuously
+   - Injects chaos conditions
+   - Collects metrics and statistics
+
+4. **floxy-stress-ui**: Floxy UI (optional)
+   - Port: 3001
+   - Web interface for monitoring workflows
+
+## Configuration
+
+### Environment Variables
+
+Configure the stress test via environment variables in `docker-compose.yml`:
+
+```yaml
+environment:
+  DB_HOST: floxy-stress-pg          # PostgreSQL host
+  DB_PORT: 5432                      # PostgreSQL port
+  DB_NAME: floxy                     # Database name
+  DB_USER: floxy                     # Database user
+  DB_PASSWORD: password              # Database password
+  USE_TOXIPROXY: false               # Enable ToxiProxy (true/false)
+  TOXIPROXY_HOST: floxy-stress-toxiproxy:8474  # ToxiProxy API address
+  REPEAT: 100                        # Number of workflow executions
 ```
 
-### With Gofail (Failpoint Injection)
+### Test Parameters
 
-1. Uncomment failpoint calls in handlers (`main.go`)
-2. Add import: `import "github.com/pingcap/failpoint"`
-3. Build and run:
+Modify test parameters in `main.go`:
 
-```bash
-go run -tags failpoint -gcflags=all=-l main.go
+```go
+// Test duration
+RunFor(30 * time.Second)
+
+// Worker count
+workerCount := 5
+
+// Validation limits
+Assert("recursion-depth", validators.RecursionDepthLimit(10))
+Assert("goroutine-leak", validators.GoroutineLimit(100))
+Assert("no-slow-iteration", validators.NoSlowIteration(15*time.Second))
 ```
 
-### Full Chaos (All Injectors)
+### Context Injections
 
-```bash
-# Start ToxiProxy
-toxiproxy-server
+```go
+// Random delay (20-100ms, 15% probability)
+Inject("context-delay", injectors.RandomDelayWithProbability(
+    time.Millisecond*20, 
+    time.Millisecond*100, 
+    0.15))
 
-# Run with all injectors
-USE_TOXIPROXY=true go run -tags failpoint -gcflags=all=-l main.go
+// Panic injection (15% probability)
+Inject("context-panic", injectors.PanicProbability(0.15))
+
+// Error injection (15% probability)
+Inject("context-error", injectors.ErrorWithProbability("chaos error", 0.15))
 ```
 
-The test will run for 60 seconds by default. Press `Ctrl+C` to stop earlier.
+### ToxiProxy Configuration
+
+Edit `toxiproxy.json` to configure proxy:
+
+```json
+{
+  "proxies": {
+    "pg": {
+      "listen": "0.0.0.0:6432",
+      "upstream": "floxy-stress-pg:5432",
+      "enabled": true
+    }
+  }
+}
+```
+
+To enable ToxiProxy, set `USE_TOXIPROXY: true` in docker-compose.yml.
 
 ## Output
 
@@ -186,7 +234,7 @@ Every 10 seconds, you'll see statistics like:
 At the end, you'll see:
 
 ```
-=== Final Report ===
+=== Final Chaos Test Report ===
 ChaosKit Execution Report
 ========================
 Total Executions: 150
@@ -234,106 +282,82 @@ Metrics: map[...]
 - Worker lifecycle management
 - Graceful shutdown
 
-## Configuration
-
-Modify the test parameters in `main.go`:
-
-### Monkey Patching
-
-```go
-// Panic probability in handlers
-PanicProb: 0.05  // 5%
-
-// Delay injection
-DelayMin: 50 * time.Millisecond
-DelayMax: 200 * time.Millisecond
-Probability: 0.2  // 20% chance
-```
-
-### Gofail
-
-```go
-// Failpoint names (must match failpoint.Inject calls)
-failpointNames := []string{
-    "payment-handler-panic",
-    "inventory-handler-panic",
-    "shipping-handler-panic",
-}
-probability: 0.03  // 3% per failpoint
-window: 500 * time.Millisecond
-```
-
-### ToxiProxy
-
-```go
-// Enable via environment variable
-USE_TOXIPROXY=true
-
-// Or modify connection config
-proxyConfig := injectors.ProxyConfig{
-    Name:     "postgres-proxy",
-    Listen:   "localhost:6432",
-    Upstream: "localhost:5435",
-}
-```
-
-### Other Parameters
-
-```go
-// Worker count
-workerCount := 5
-
-// Test duration
-RunFor(60 * time.Second)
-
-// Validation limits
-Assert("recursion-depth", validators.RecursionDepthLimit(50))
-Assert("goroutine-leak", validators.GoroutineLimit(500))
-```
-
 ## Integration with ChaosKit
 
-This example demonstrates ChaosKit's advanced capabilities:
+This example demonstrates ChaosKit's capabilities:
 
 1. **Target Interface**: Floxy engine wrapped as ChaosKit target
-2. **Monkey Patching Injectors**: Runtime function patching for panic and delay injection
-3. **Gofail Injectors**: Failpoint-based chaos injection (compile-time)
-4. **ToxiProxy Injectors**: Network-level chaos for database connections
+2. **Context Injectors**: Delay, panic, and error injection via context
+3. **Failpoint Injectors**: Failpoint-based chaos injection (compile-time, optional)
+4. **ToxiProxy Injectors**: Network-level chaos for database connections (optional)
 5. **Validators**: Recursion depth, goroutine leak, infinite loop detection
 6. **Failure Policy**: ContinueOnFailure for continuous testing
 7. **Metrics**: Automatic collection and reporting
 
 ### Injection Methods Comparison
 
-| Method | Type | Requires Build Flags | Code Changes | When to Use |
-|--------|------|---------------------|--------------|-------------|
-| Monkey Patching | Runtime | `-gcflags=all=-l` | No | Runtime patching, testing external code |
-| Gofail | Compile-time | `-tags failpoint` | Yes (failpoint.Inject) | Production-safe, explicit injection points |
-| ToxiProxy | Network | No | No (proxy setup) | Network-level chaos, database testing |
+| Method | Type | Requires Build Flags | Code Changes | Status |
+|--------|------|---------------------|--------------|--------|
+| Context Injections | Runtime | No | No | ✅ Active |
+| Failpoint | Compile-time | `-tags failpoint` | Yes (failpoint.Inject) | ⚠️ Optional |
+| ToxiProxy | Network | No | No (proxy setup) | ⚠️ Optional |
+| Monkey Patching | Runtime | `-gcflags=all=-l` | No | ❌ Disabled |
 
 ## Troubleshooting
 
-**Database connection errors**
+### Database connection errors
 
-Ensure PostgreSQL is running and accessible:
+Check if PostgreSQL is running:
+
 ```bash
-psql -h localhost -p 5435 -U floxy -d floxy
+docker compose ps floxy-stress-pg
+docker compose logs floxy-stress-pg
 ```
 
-**High failure rate**
+### ToxiProxy not working
 
-This is expected with 15% random failure injection. Adjust the probability:
+1. Check if ToxiProxy is running:
+   ```bash
+   docker compose ps floxy-stress-toxiproxy
+   docker compose logs floxy-stress-toxiproxy
+   ```
+
+2. Verify proxy is created:
+   ```bash
+   curl http://localhost:8474/proxies
+   ```
+
+3. Ensure `USE_TOXIPROXY: true` in docker-compose.yml
+
+### High failure rate
+
+This is expected with 15% random failure injection. Adjust the probability in `main.go`:
+
 ```go
-"should_fail": rand.Float64() < 0.05  // 5% instead of 15%
+Inject("context-panic", injectors.PanicProbability(0.05))  // 5% instead of 15%
 ```
 
-**Goroutine limit exceeded**
+### Goroutine limit exceeded
 
 Increase the limit or reduce worker count:
+
 ```go
-Assert("goroutine-leak", validators.GoroutineLimit(1000))
+Assert("goroutine-leak", validators.GoroutineLimit(200))
 // or
 workerCount := 3
+```
+
+### Viewing logs
+
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f floxy-stress-tester
+
+# Last 100 lines
+docker compose logs --tail=100 floxy-stress-tester
 ```
 
 ## Expected Results
@@ -347,10 +371,30 @@ A healthy Floxy engine should show:
 - Proper compensation execution
 - Consistent state after rollback
 
-## Next Steps
+## Development
 
-- Increase test duration for long-running validation
-- Add more complex workflow patterns
-- Test DLQ mode workflows
-- Add custom validators for business logic
-- Integrate with CI/CD pipeline
+### Building locally
+
+```bash
+# Build Go application
+go build -o floxy-stress-test .
+
+# Run locally (requires PostgreSQL running)
+DB_HOST=localhost DB_PORT=5432 DB_NAME=floxy DB_USER=floxy DB_PASSWORD=password ./floxy-stress-test
+```
+
+### Running tests with Failpoint
+
+1. Uncomment failpoint calls in handlers (`main.go`)
+2. Build with failpoint tag:
+   ```bash
+   docker compose build --build-arg BUILD_TAGS=failpoint floxy-stress-tester
+   ```
+
+### Enabling ToxiProxy
+
+1. Set `USE_TOXIPROXY: true` in docker-compose.yml
+2. Restart services:
+   ```bash
+   make docker-restart
+   ```
