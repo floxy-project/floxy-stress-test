@@ -10,10 +10,8 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -72,64 +70,6 @@ func main() {
 		connString = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", dbUser, dbPassword, "floxy-stress-toxiproxy", 6432, dbName)
 	} else {
 		log.Printf("[Setup] Connecting directly to PostgreSQL: %s:%s", dbHost, dbPort)
-	}
-
-	// Wait for proxy to be ready if using ToxiProxy
-	if useToxiProxy && connString != directConnString {
-		// Extract host and port from proxy connection string
-		parsedURL, err := url.Parse(connString)
-		if err == nil && parsedURL.Host != "" {
-			proxyHost := parsedURL.Hostname()
-			proxyPortStr := parsedURL.Port()
-			if proxyPortStr == "" {
-				proxyPortStr = "6432"
-			}
-			proxyPort, err := strconv.Atoi(proxyPortStr)
-			if err == nil && proxyHost != "" {
-				log.Println("[Setup] Ensuring ToxiProxy proxy is created...")
-
-				// Try to create proxy if it doesn't exist
-				// Listen address: 0.0.0.0:6432 (inside container, listens on all interfaces)
-				// Upstream: PostgreSQL address (e.g., floxy-stress-pg:5432)
-				listenAddr := fmt.Sprintf("0.0.0.0:%d", proxyPort)
-				upstreamAddr := fmt.Sprintf("%s:%s", dbHost, dbPort)
-
-				// Wait for ToxiProxy API to be ready first
-				apiReady := false
-				apiURL := fmt.Sprintf("http://%s/version", toxiproxyHost)
-				log.Printf("[Setup] Waiting for ToxiProxy API at %s to be ready...", apiURL)
-				for i := 0; i < 30; i++ {
-					client := &http.Client{Timeout: 2 * time.Second}
-					resp, err := client.Get(apiURL)
-					if err == nil && resp.StatusCode == http.StatusOK {
-						_ = resp.Body.Close()
-						apiReady = true
-						log.Printf("[Setup] ToxiProxy API is ready")
-
-						break
-					}
-					if i%5 == 0 && i > 0 {
-						log.Printf("[Setup] Still waiting for ToxiProxy API... (attempt %d/30)", i+1)
-					}
-					time.Sleep(1 * time.Second)
-				}
-
-				if !apiReady {
-					log.Printf("[Setup] Warning: ToxiProxy API at %s not ready after 60 seconds, continuing anyway...", apiURL)
-				}
-
-				// Create proxy if it doesn't exist
-				if err := createProxyIfNotExists(toxiproxyHost, "pg", listenAddr, upstreamAddr); err != nil {
-					log.Printf("[Setup] Warning: Failed to create proxy via API (may already exist): %v", err)
-				}
-
-				log.Println("[Setup] Waiting for ToxiProxy proxy to be ready...")
-				// Proxy name from toxiproxy.json is "pg"
-				if err := waitForProxyReady(proxyHost, proxyPort, toxiproxyHost, "pg", 30, 2*time.Second); err != nil {
-					log.Fatalf("Failed to wait for proxy: %v", err)
-				}
-			}
-		}
 	}
 
 	// Create a Floxy target
