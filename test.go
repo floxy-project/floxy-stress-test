@@ -41,15 +41,14 @@ func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarge
 		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
 
+	log.Println("[Floxy] Running migrations...")
 	if err := floxy.RunMigrations(ctx, poolMigrations); err != nil {
 		poolMigrations.Close()
 
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 	poolMigrations.Close()
-
-	// Wait for proxy to be ready before connecting
-	// This will be called from main() with toxiproxy API info
+	log.Println("[Floxy] Migrations completed")
 
 	pool, err := pgxpool.New(ctx, proxyConnString)
 	if err != nil {
@@ -263,8 +262,6 @@ func (t *FloxyStressTarget) ExecuteRandomWorkflow(ctx context.Context) error {
 		"user_id":  fmt.Sprintf("user-%d", rand.Intn(1000)),
 		"amount":   float64(rand.Intn(500) + 50),
 		"items":    rand.Intn(10) + 1,
-		// Random failure injection
-		"should_fail": rand.Float64() < 0.15, // 15% chance of failure
 	}
 
 	input, _ := json.Marshal(order)
@@ -360,11 +357,13 @@ func (t *FloxyStressTarget) GetStats() map[string]interface{} {
 // PaymentHandler processes payment
 var processPaymentHandler = func(ctx context.Context, order map[string]any) error {
 	// Simulate processing time
-	time.Sleep(time.Millisecond * time.Duration(10+rand.Intn(20)))
+	time.Sleep(time.Millisecond * time.Duration(5+rand.Intn(20)))
 
-	// Check for forced failure
-	if shouldFail, ok := order["should_fail"].(bool); ok && shouldFail && rand.Float64() < 0.3 {
-		return fmt.Errorf("payment processing failed")
+	chaoskit.MaybePanic(ctx)
+	chaoskit.MaybeDelay(ctx)
+	chaoskit.MaybeDelay(ctx)
+	if err := chaoskit.MaybeError(ctx); err != nil {
+		return err
 	}
 
 	order["payment_status"] = "paid"
@@ -400,8 +399,11 @@ var processInventoryHandler = func(ctx context.Context, order map[string]any) er
 
 	time.Sleep(time.Millisecond * time.Duration(5+rand.Intn(15)))
 
-	if shouldFail, ok := order["should_fail"].(bool); ok && shouldFail && rand.Float64() < 0.2 {
-		return fmt.Errorf("inventory reservation failed")
+	chaoskit.MaybePanic(ctx)
+	chaoskit.MaybeDelay(ctx)
+	chaoskit.MaybeDelay(ctx)
+	if err := chaoskit.MaybeError(ctx); err != nil {
+		return err
 	}
 
 	order["inventory_status"] = "reserved"
@@ -434,8 +436,11 @@ func (h *InventoryHandler) Execute(
 var processShippingHandler = func(ctx context.Context, order map[string]any) error {
 	time.Sleep(time.Millisecond * time.Duration(10+rand.Intn(20)))
 
-	if shouldFail, ok := order["should_fail"].(bool); ok && shouldFail && rand.Float64() < 0.1 {
-		return fmt.Errorf("shipping failed")
+	chaoskit.MaybePanic(ctx)
+	chaoskit.MaybeDelay(ctx)
+	chaoskit.MaybeDelay(ctx)
+	if err := chaoskit.MaybeError(ctx); err != nil {
+		return err
 	}
 
 	order["shipping_status"] = "shipped"

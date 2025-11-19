@@ -26,11 +26,6 @@ func main() {
 	log.Println("=== Floxy Stress Test with ChaosKit ===")
 	log.Println("Testing Floxy workflow engine with advanced chaos injection")
 	log.Println()
-	log.Println("Chaos injection methods:")
-	log.Println("  1. Monkey patching - runtime function patching")
-	log.Println("  2. Failpoint - failpoint-based injection")
-	log.Println("  3. ToxiProxy - network chaos for database")
-	log.Println()
 
 	repeatStr := os.Getenv("REPEAT")
 	repeat := 100
@@ -85,13 +80,15 @@ func main() {
 
 	// Create a Floxy target
 	log.Println("[Setup] Creating Floxy target...")
-	if err := RegisterWorkflows(directConnString); err != nil {
-		log.Fatalf("Failed to register workflows: %v", err)
-	}
-
 	floxyTarget, err := NewFloxyStressTarget(directConnString, connString)
 	if err != nil {
 		log.Fatalf("Failed to create Floxy target: %v", err)
+	}
+
+	// Register workflows
+	log.Println("[Setup] Registering workflows...")
+	if err := RegisterWorkflows(directConnString); err != nil {
+		log.Fatalf("Failed to register workflows: %v", err)
 	}
 
 	// Setup signal handling
@@ -122,46 +119,46 @@ func main() {
 
 	// 1. Monkey patching injectors for handlers
 	// Note: Must pass pointer to function for monkey patching
-	monkeyPanicTargets := []injectors.PatchTarget{
-		{
-			Func:        &processPaymentHandler,
-			Probability: 0.05, // 5% chance of panic
-			FuncName:    "processPaymentHandler",
-		},
-		{
-			Func:        &processInventoryHandler,
-			Probability: 0.05,
-			FuncName:    "processInventoryHandler",
-		},
-		{
-			Func:        &processShippingHandler,
-			Probability: 0.05,
-			FuncName:    "processShippingHandler",
-		},
-	}
-
-	monkeyPanicInjector := injectors.MonkeyPatchPanic(monkeyPanicTargets)
-
-	monkeyDelayTargets := []injectors.DelayPatchTarget{
-		{
-			Func:        &processPaymentHandler,
-			MinDelay:    50 * time.Millisecond,
-			MaxDelay:    200 * time.Millisecond,
-			Probability: 0.2, // 20% chance of delay
-			DelayBefore: true,
-			FuncName:    "processPaymentHandler",
-		},
-		{
-			Func:        &processInventoryHandler,
-			MinDelay:    30 * time.Millisecond,
-			MaxDelay:    150 * time.Millisecond,
-			Probability: 0.15,
-			DelayBefore: true,
-			FuncName:    "processInventoryHandler",
-		},
-	}
-
-	monkeyDelayInjector := injectors.MonkeyPatchDelay(monkeyDelayTargets)
+	//monkeyPanicTargets := []injectors.PatchTarget{
+	//	{
+	//		Func:        &processPaymentHandler,
+	//		Probability: 0.05, // 5% chance of panic
+	//		FuncName:    "processPaymentHandler",
+	//	},
+	//	{
+	//		Func:        &processInventoryHandler,
+	//		Probability: 0.05,
+	//		FuncName:    "processInventoryHandler",
+	//	},
+	//	{
+	//		Func:        &processShippingHandler,
+	//		Probability: 0.05,
+	//		FuncName:    "processShippingHandler",
+	//	},
+	//}
+	//
+	//monkeyPanicInjector := injectors.MonkeyPatchPanic(monkeyPanicTargets)
+	//
+	//monkeyDelayTargets := []injectors.DelayPatchTarget{
+	//	{
+	//		Func:        &processPaymentHandler,
+	//		MinDelay:    50 * time.Millisecond,
+	//		MaxDelay:    200 * time.Millisecond,
+	//		Probability: 0.2, // 20% chance of delay
+	//		DelayBefore: true,
+	//		FuncName:    "processPaymentHandler",
+	//	},
+	//	{
+	//		Func:        &processInventoryHandler,
+	//		MinDelay:    30 * time.Millisecond,
+	//		MaxDelay:    150 * time.Millisecond,
+	//		Probability: 0.15,
+	//		DelayBefore: true,
+	//		FuncName:    "processInventoryHandler",
+	//	},
+	//}
+	//
+	//monkeyDelayInjector := injectors.MonkeyPatchDelay(monkeyDelayTargets)
 
 	// 2. Failpoint injector (requires build with -tags failpoint)
 	failpointNames := []string{
@@ -206,9 +203,12 @@ func main() {
 	scenarioBuilder := chaoskit.NewScenario("floxy-stress-test").
 		WithTarget(floxyTarget).
 		Step("execute-workflow", RunFloxyWorkflow).
-		// Monkey patching injectors (always active)
-		Inject("monkey-panic", monkeyPanicInjector).
-		Inject("monkey-delay", monkeyDelayInjector)
+		Inject("context-delay", injectors.RandomDelayWithProbability(time.Millisecond*20, time.Millisecond*100, 0.15)).
+		Inject("context-panic", injectors.PanicProbability(0.15)).
+		Inject("context-error", injectors.ErrorWithProbability("chaos error", 0.15))
+	//// Monkey patching injectors (always active)
+	//Inject("monkey-panic", monkeyPanicInjector).
+	//Inject("monkey-delay", monkeyDelayInjector)
 
 	// Failpoint injector (may fail if not built with -tags failpoint)
 	if err := failpointInjector.Inject(ctx); err != nil {
