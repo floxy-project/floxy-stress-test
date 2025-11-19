@@ -645,15 +645,33 @@ func main() {
 
 	// Database connection configuration
 	// Can use direct connection or via ToxiProxy
+	dbHost := os.Getenv("DB_HOST")
+	if dbHost == "" {
+		dbHost = "localhost"
+	}
+	dbPort := os.Getenv("DB_PORT")
+	if dbPort == "" {
+		dbPort = "5432"
+	}
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "floxy"
+	}
+	dbUser := os.Getenv("DB_USER")
+	if dbUser == "" {
+		dbUser = "floxy"
+	}
+	dbPassword := os.Getenv("DB_PASSWORD")
+
+	directConnString := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", dbUser, dbPassword, dbHost, dbPort, dbName)
+	connString := directConnString
+
 	useToxiProxy := os.Getenv("USE_TOXIPROXY") == "true"
 	toxiproxyHost := os.Getenv("TOXIPROXY_HOST")
 	if toxiproxyHost == "" {
-		toxiproxyHost = "http://localhost:8474"
+		toxiproxyHost = "localhost:6432"
 	}
-
-	// Default connection string
-	directConnString := "postgres://floxy:password@localhost:5435/floxy?sslmode=disable"
-	connString := directConnString
+	toxiproxyURL := "http://" + toxiproxyHost
 
 	// Setup ToxiProxy for database connection chaos
 	var toxiproxyClient *injectors.ToxiProxyClient
@@ -666,8 +684,8 @@ func main() {
 		// Create proxy for PostgreSQL
 		proxyConfig := injectors.ProxyConfig{
 			Name:     "postgres-proxy",
-			Listen:   "localhost:6432", // Proxy listens here
-			Upstream: "localhost:5435", // Actual PostgreSQL
+			Listen:   toxiproxyURL,          // Proxy listens here
+			Upstream: dbHost + ":" + dbPort, // Actual PostgreSQL
 			Enabled:  true,
 		}
 
@@ -675,7 +693,8 @@ func main() {
 			log.Printf("[Setup] Note: Proxy might already exist: %v", err)
 		} else {
 			// Use proxy connection string
-			connString = "postgres://floxy:password@localhost:6432/floxy?sslmode=disable"
+			connString = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
+				dbUser, dbPassword, toxiproxyHost, dbName)
 			log.Println("[Setup] Using ToxiProxy for database connections")
 		}
 	}

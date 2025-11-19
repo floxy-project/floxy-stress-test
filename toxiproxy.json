@@ -1,0 +1,9 @@
+{
+  "proxies": {
+    "pg": {
+      "listen": "0.0.0.0:6432",
+      "upstream": "floxy-stress-pg:5432",
+      "enabled": true
+    }
+  }
+}
