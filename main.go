@@ -213,7 +213,7 @@ func main() {
 		WithTarget(floxyTarget).
 		Step("execute-workflow", RunFloxyWorkflow).
 		Inject("context-delay", injectors.RandomDelayWithProbability(time.Millisecond*20, time.Millisecond*100, 0.15)).
-		//Inject("context-panic", injectors.PanicProbability(0.15)).
+		Inject("context-panic", injectors.PanicProbability(0.15)).
 		Inject("context-error", injectors.ErrorWithProbability("chaos error", 0.35))
 	//// Monkey patching injectors (always active)
 	//Inject("monkey-panic", monkeyPanicInjector).
