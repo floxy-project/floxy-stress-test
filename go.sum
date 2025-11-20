@@ -137,8 +137,8 @@ github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0t
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/rom8726/chaoskit v0.6.0 h1:PoT9mecF/xqKHdg551k04/VTTXLdc89+InPedbHbuZQ=
 github.com/rom8726/chaoskit v0.6.0/go.mod h1:X7jRK6lVFFnpTGOEgduOndkF/HuJEuQh7+kjzo3WgKI=
-github.com/rom8726/floxy v1.14.3 h1:QVorZdd9es3NfUFi38OzwBAtt5zFylgCwmN4IaEehKU=
-github.com/rom8726/floxy v1.14.3/go.mod h1:5poPGvNeWr2a2aN7O3cemFIcCqTNkZ1dgxdv6Vl3/Ok=
+github.com/rom8726/floxy v1.14.4 h1:JHBzmS/2kcHkt4cwmvQ6PAp4S0Ol7A1YEmhd7L15XLQ=
+github.com/rom8726/floxy v1.14.4/go.mod h1:5poPGvNeWr2a2aN7O3cemFIcCqTNkZ1dgxdv6Vl3/Ok=
 github.com/shirou/gopsutil/v4 v4.25.6 h1:kLysI2JsKorfaFPcYmcJqbzROzsBWEOAtw6A7dIfqXs=
 github.com/shirou/gopsutil/v4 v4.25.6/go.mod h1:PfybzyydfZcN+JMMjkF6Zb8Mq1A/VcogFFg7hj50W9c=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=

@@ -16,6 +16,7 @@ import (
 	"github.com/rom8726/floxy"
 	"github.com/rom8726/floxy/plugins/engine/metrics"
 	rolldepth "github.com/rom8726/floxy/plugins/engine/rollback-depth"
+	"golang.org/x/sync/errgroup"
 )
 
 // FloxyStressTarget wraps Floxy engine as a ChaosKit target
@@ -30,7 +31,6 @@ type FloxyStressTarget struct {
 	rollbackCount     atomic.Int64
 	maxRollbackDepth  atomic.Int32
 	mu                sync.RWMutex
-	workers           []context.CancelFunc
 }
 
 func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarget, error) {
@@ -92,16 +92,6 @@ func (t *FloxyStressTarget) Setup(ctx context.Context) error {
 
 func (t *FloxyStressTarget) Teardown(ctx context.Context) error {
 	log.Println("[Floxy] Tearing down stress test target...")
-
-	// Stop workers
-	t.mu.Lock()
-	for _, cancel := range t.workers {
-		cancel()
-	}
-	t.mu.Unlock()
-
-	// Wait a bit for workers to finish
-	time.Sleep(500 * time.Millisecond)
 
 	// Shutdown engine
 	_ = t.engine.Shutdown()
@@ -338,7 +328,18 @@ func (t *FloxyStressTarget) ExecuteRandomWorkflow(ctx context.Context) error {
 		}
 	}(ctxMonitor)
 
-	return t.worker(ctx, uuid.NewString())
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		return t.worker(groupCtx, uuid.NewString())
+	})
+	group.Go(func() error {
+		return t.worker(groupCtx, uuid.NewString())
+	})
+	group.Go(func() error {
+		return t.worker(groupCtx, uuid.NewString())
+	})
+
+	return group.Wait()
 }
 
 func (t *FloxyStressTarget) GetStats() map[string]interface{} {
