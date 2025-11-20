@@ -6,14 +6,17 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rom8726/chaoskit"
 )
 
 // QueueEmptyValidator checks that the workflow_queue table is empty
-type QueueEmptyValidator struct{}
+type QueueEmptyValidator struct {
+	pool *pgxpool.Pool
+}
 
-func NewQueueEmptyValidator() *QueueEmptyValidator {
-	return &QueueEmptyValidator{}
+func NewQueueEmptyValidator(pool *pgxpool.Pool) *QueueEmptyValidator {
+	return &QueueEmptyValidator{pool: pool}
 }
 
 func (v *QueueEmptyValidator) Name() string {
@@ -25,13 +28,8 @@ func (v *QueueEmptyValidator) Severity() chaoskit.ValidationSeverity {
 }
 
 func (v *QueueEmptyValidator) Validate(ctx context.Context, target chaoskit.Target) error {
-	floxyTarget, ok := target.(*FloxyStressTarget)
-	if !ok {
-		return fmt.Errorf("target is not FloxyStressTarget")
-	}
-
 	var count int
-	err := floxyTarget.pool.QueryRow(ctx, "SELECT COUNT(*) FROM workflows.workflow_queue").Scan(&count)
+	err := v.pool.QueryRow(ctx, "SELECT COUNT(*) FROM workflows.workflow_queue").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to query workflow_queue: %w", err)
 	}
@@ -44,10 +42,12 @@ func (v *QueueEmptyValidator) Validate(ctx context.Context, target chaoskit.Targ
 }
 
 // CompletedInstancesValidator checks that for completed instances, all steps are also completed
-type CompletedInstancesValidator struct{}
+type CompletedInstancesValidator struct {
+	pool *pgxpool.Pool
+}
 
-func NewCompletedInstancesValidator() *CompletedInstancesValidator {
-	return &CompletedInstancesValidator{}
+func NewCompletedInstancesValidator(pool *pgxpool.Pool) *CompletedInstancesValidator {
+	return &CompletedInstancesValidator{pool: pool}
 }
 
 func (v *CompletedInstancesValidator) Name() string {
@@ -59,11 +59,6 @@ func (v *CompletedInstancesValidator) Severity() chaoskit.ValidationSeverity {
 }
 
 func (v *CompletedInstancesValidator) Validate(ctx context.Context, target chaoskit.Target) error {
-	floxyTarget, ok := target.(*FloxyStressTarget)
-	if !ok {
-		return fmt.Errorf("target is not FloxyStressTarget")
-	}
-
 	// Find all completed instances that have steps not in completed state
 	query := `
 SELECT DISTINCT wi.id, wi.workflow_id
@@ -72,7 +67,7 @@ INNER JOIN workflows.workflow_steps ws ON wi.id = ws.instance_id
 WHERE wi.status = 'completed'
   AND ws.status != 'completed'`
 
-	rows, err := floxyTarget.pool.Query(ctx, query)
+	rows, err := v.pool.Query(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to query completed instances: %w", err)
 	}
@@ -100,10 +95,12 @@ WHERE wi.status = 'completed'
 }
 
 // FailedInstancesValidator checks step states for failed instances
-type FailedInstancesValidator struct{}
+type FailedInstancesValidator struct {
+	pool *pgxpool.Pool
+}
 
-func NewFailedInstancesValidator() *FailedInstancesValidator {
-	return &FailedInstancesValidator{}
+func NewFailedInstancesValidator(pool *pgxpool.Pool) *FailedInstancesValidator {
+	return &FailedInstancesValidator{pool: pool}
 }
 
 func (v *FailedInstancesValidator) Name() string {
@@ -115,18 +112,13 @@ func (v *FailedInstancesValidator) Severity() chaoskit.ValidationSeverity {
 }
 
 func (v *FailedInstancesValidator) Validate(ctx context.Context, target chaoskit.Target) error {
-	floxyTarget, ok := target.(*FloxyStressTarget)
-	if !ok {
-		return fmt.Errorf("target is not FloxyStressTarget")
-	}
-
 	// Get all failed instances
 	instancesQuery := `
 SELECT id, workflow_id
 FROM workflows.workflow_instances
 WHERE status = 'failed'`
 
-	instancesRows, err := floxyTarget.pool.Query(ctx, instancesQuery)
+	instancesRows, err := v.pool.Query(ctx, instancesQuery)
 	if err != nil {
 		return fmt.Errorf("failed to query failed instances: %w", err)
 	}
@@ -151,7 +143,7 @@ WHERE status = 'failed'`
 			WHERE instance_id = $1 AND step_type = 'save_point'
 			ORDER BY created_at DESC, id DESC
 			LIMIT 1`
-		err := floxyTarget.pool.QueryRow(ctx, savepointQuery, instanceID).Scan(&savepointID, &savepointCreatedAt)
+		err := v.pool.QueryRow(ctx, savepointQuery, instanceID).Scan(&savepointID, &savepointCreatedAt)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("failed to query savepoint for instance %d: %w", instanceID, err)
 		}
@@ -162,7 +154,7 @@ WHERE status = 'failed'`
 				SELECT id, step_name, status
 				FROM workflows.workflow_steps
 				WHERE instance_id = $1 AND status != 'rolled_back'`
-			stepsRows, err := floxyTarget.pool.Query(ctx, nonRolledBackQuery, instanceID)
+			stepsRows, err := v.pool.Query(ctx, nonRolledBackQuery, instanceID)
 			if err != nil {
 				return fmt.Errorf("failed to query steps for instance %d: %w", instanceID, err)
 			}
@@ -196,7 +188,7 @@ WHERE status = 'failed'`
 				  AND ws.status != 'rolled_back'
 				  AND ws.created_at > (SELECT created_at FROM workflows.workflow_steps WHERE id = $2)
 				ORDER BY ws.created_at`
-			stepsRows, err := floxyTarget.pool.Query(ctx, nonRolledBackQuery, instanceID, *savepointID)
+			stepsRows, err := v.pool.Query(ctx, nonRolledBackQuery, instanceID, *savepointID)
 			if err != nil {
 				return fmt.Errorf("failed to query steps for instance %d: %w", instanceID, err)
 			}

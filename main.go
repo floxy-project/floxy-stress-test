@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rom8726/chaoskit"
 	"github.com/rom8726/chaoskit/injectors"
 	"github.com/rom8726/chaoskit/validators"
@@ -97,6 +98,14 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Create a direct database pool for validators (bypasses ToxiProxy)
+	log.Println("[Setup] Creating direct database pool for validators...")
+	validatorPool, err := pgxpool.New(ctx, directConnString)
+	if err != nil {
+		log.Fatalf("Failed to create validator pool: %v", err)
+	}
+	defer validatorPool.Close()
 
 	// Statistics reporter
 	//go func() {
@@ -237,10 +246,10 @@ func main() {
 		Assert("goroutine-leak", validators.GoroutineLimit(100)).
 		Assert("no-slow-iteration", validators.NoSlowIteration(5*time.Second)).
 		Assert("no-infinite-loops", validators.NoInfiniteLoop(10*time.Second)).
-		// Database consistency validators
-		Assert("queue-empty", NewQueueEmptyValidator()).
-		Assert("completed-instances-consistency", NewCompletedInstancesValidator()).
-		Assert("failed-instances-consistency", NewFailedInstancesValidator()).
+		// Database consistency validators (use direct connection pool, bypassing ToxiProxy)
+		Assert("queue-empty", NewQueueEmptyValidator(validatorPool)).
+		Assert("completed-instances-consistency", NewCompletedInstancesValidator(validatorPool)).
+		Assert("failed-instances-consistency", NewFailedInstancesValidator(validatorPool)).
 		Repeat(repeat).
 		Build()
 
