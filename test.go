@@ -361,7 +361,6 @@ var processPaymentHandler = func(ctx context.Context, order map[string]any) erro
 
 	chaoskit.MaybePanic(ctx)
 	chaoskit.MaybeDelay(ctx)
-	chaoskit.MaybeDelay(ctx)
 	if err := chaoskit.MaybeError(ctx); err != nil {
 		return err
 	}
@@ -401,7 +400,6 @@ var processInventoryHandler = func(ctx context.Context, order map[string]any) er
 
 	chaoskit.MaybePanic(ctx)
 	chaoskit.MaybeDelay(ctx)
-	chaoskit.MaybeDelay(ctx)
 	if err := chaoskit.MaybeError(ctx); err != nil {
 		return err
 	}
@@ -437,7 +435,6 @@ var processShippingHandler = func(ctx context.Context, order map[string]any) err
 	time.Sleep(time.Millisecond * time.Duration(10+rand.Intn(20)))
 
 	chaoskit.MaybePanic(ctx)
-	chaoskit.MaybeDelay(ctx)
 	chaoskit.MaybeDelay(ctx)
 	if err := chaoskit.MaybeError(ctx); err != nil {
 		return err
