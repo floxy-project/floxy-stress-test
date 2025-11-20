@@ -142,13 +142,14 @@ WHERE status = 'failed'`
 		}
 
 		// Check if there's a savepoint for this instance
+		// Get the latest savepoint (by created_at DESC, then by id DESC as tiebreaker)
 		var savepointID *int64
 		var savepointCreatedAt *string
 		savepointQuery := `
 			SELECT id, created_at::text
 			FROM workflows.workflow_steps
 			WHERE instance_id = $1 AND step_type = 'save_point'
-			ORDER BY created_at DESC
+			ORDER BY created_at DESC, id DESC
 			LIMIT 1`
 		err := floxyTarget.pool.QueryRow(ctx, savepointQuery, instanceID).Scan(&savepointID, &savepointCreatedAt)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -160,8 +161,7 @@ WHERE status = 'failed'`
 			nonRolledBackQuery := `
 				SELECT id, step_name, status
 				FROM workflows.workflow_steps
-				WHERE instance_id = $1 AND status != 'rolled_back'
-			`
+				WHERE instance_id = $1 AND status != 'rolled_back'`
 			stepsRows, err := floxyTarget.pool.Query(ctx, nonRolledBackQuery, instanceID)
 			if err != nil {
 				return fmt.Errorf("failed to query steps for instance %d: %w", instanceID, err)
@@ -187,22 +187,15 @@ WHERE status = 'failed'`
 				violations = append(violations, fmt.Sprintf("instance_id=%d workflow_id=%s (no savepoint): non-rolled_back steps: %v", instanceID, workflowID, nonRolledBackSteps))
 			}
 		} else {
-			// Savepoint exists - check that all steps except savepoint and steps before savepoint are in rolled_back state
-			// Steps that should be rolled_back:
-			// - All steps created AFTER savepoint (created_at > savepoint.created_at)
-			// - Steps created BEFORE savepoint, but not the savepoint itself
+			// Savepoint exists - check that all steps created AFTER the latest savepoint are in rolled_back state
+			// Steps created before or at the savepoint time (including the savepoint itself) are not checked
 			nonRolledBackQuery := `
 				SELECT ws.id, ws.step_name, ws.status, ws.created_at::text
 				FROM workflows.workflow_steps ws
 				WHERE ws.instance_id = $1
 				  AND ws.status != 'rolled_back'
-				  AND (
-					-- Steps created after savepoint
-					ws.created_at > (SELECT created_at FROM workflows.workflow_steps WHERE id = $2)
-					OR
-					-- Steps created before savepoint (but not the savepoint itself)
-					(ws.created_at < (SELECT created_at FROM workflows.workflow_steps WHERE id = $2) AND ws.id != $2)
-				  )`
+				  AND ws.created_at > (SELECT created_at FROM workflows.workflow_steps WHERE id = $2)
+				ORDER BY ws.created_at`
 			stepsRows, err := floxyTarget.pool.Query(ctx, nonRolledBackQuery, instanceID, *savepointID)
 			if err != nil {
 				return fmt.Errorf("failed to query steps for instance %d: %w", instanceID, err)
@@ -225,7 +218,7 @@ WHERE status = 'failed'`
 			}
 
 			if len(nonRolledBackSteps) > 0 {
-				violations = append(violations, fmt.Sprintf("instance_id=%d workflow_id=%s (with savepoint_id=%d): non-rolled_back steps: %v", instanceID, workflowID, *savepointID, nonRolledBackSteps))
+				violations = append(violations, fmt.Sprintf("instance_id=%d workflow_id=%s (latest savepoint_id=%d created_at=%s): non-rolled_back steps created after savepoint: %v", instanceID, workflowID, *savepointID, *savepointCreatedAt, nonRolledBackSteps))
 			}
 		}
 	}
