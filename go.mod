@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/rom8726/chaoskit v0.6.0
-	github.com/rom8726/floxy v1.14.4
+	github.com/rom8726/floxy v1.14.5
 	golang.org/x/sync v0.18.0
 )
 
