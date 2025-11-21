@@ -27,14 +27,11 @@ services:
     image: ghcr.io/shopify/toxiproxy:latest
     container_name: floxy-stress-toxiproxy
     ports:
-      - "8474:8474"   # API
-      - "6432:6432"   # Proxy listener
-    command: >
-      /toxiproxy-server
-      --host 0.0.0.0
-      --config /etc/toxiproxy.json
+      - "8474:8474"
+      - "6432:6432"
     volumes:
-      - ./toxiproxy.json:/etc/toxiproxy.json
+      - ./toxiproxy.json:/config/toxiproxy.json
+    command: -config /config/toxiproxy.json
     depends_on:
       floxy-stress-pg:
         condition: service_healthy
@@ -50,9 +47,11 @@ services:
       DB_NAME: floxy
       DB_USER: floxy
       DB_PASSWORD: password
-      USE_TOXIPROXY: false
-      TOXIPROXY_HOST: floxy-stress-toxiproxy:8474
-      REPEAT: 100
+      USE_TOXIPROXY: true
+      TOXIPROXY_HOST: floxy-stress-toxiproxy
+      TOXIPROXY_API_PORT: 8474
+      TOXIPROXY_PORT: 6432
+      REPEAT: 1
     depends_on:
       floxy-stress-toxiproxy:
         condition: service_started
