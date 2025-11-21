@@ -373,7 +373,7 @@ A healthy Floxy engine should show:
 
 ## Real test executions
 
-### 20205-11-20
+### 2025-11-20
 
 <img width="1410" height="673" alt="floxy_stress_test_2025_11_20" src="https://github.com/user-attachments/assets/7b5335ac-4895-4073-b24e-3519d4b34513" />
 
