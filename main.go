@@ -63,18 +63,24 @@ func main() {
 
 	useToxiProxy := os.Getenv("USE_TOXIPROXY") == "true"
 	toxiproxyHost := os.Getenv("TOXIPROXY_HOST")
+	toxiproxyAPIPort := os.Getenv("TOXIPROXY_API_PORT")
+	toxiproxyProxyPort := os.Getenv("TOXIPROXY_PORT")
 	if toxiproxyHost == "" {
-		toxiproxyHost = "localhost:8474"
+		toxiproxyHost = "localhost"
+	}
+	if toxiproxyAPIPort == "" {
+		toxiproxyAPIPort = "8474"
+	}
+	if toxiproxyProxyPort == "" {
+		toxiproxyProxyPort = "6432"
 	}
 
-	// Setup ToxiProxy client for managing toxins (latency, bandwidth, timeout)
-	// Note: Proxy is already configured via toxiproxy.json, we just use it for connection
 	var toxiproxyClient *injectors.ToxiProxyClient
 	if useToxiProxy {
 		log.Println("[Setup] Initializing ToxiProxy client for database connection chaos...")
-		toxiproxyClient = injectors.NewToxiProxyClient(toxiproxyHost)
-		log.Printf("[Setup] Using ToxiProxy for database connections: %s:%s (proxy configured via toxiproxy.json)", dbHost, dbPort)
-		connString = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", dbUser, dbPassword, "floxy-stress-toxiproxy", 6432, dbName)
+		toxiproxyClient = injectors.NewToxiProxyClient(net.JoinHostPort(toxiproxyHost, toxiproxyAPIPort))
+		log.Printf("[Setup] Using ToxiProxy for database connections: %s:%s (proxy configured via toxiproxy.json)", toxiproxyHost, toxiproxyProxyPort)
+		connString = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", dbUser, dbPassword, toxiproxyHost, toxiproxyProxyPort, dbName)
 	} else {
 		log.Printf("[Setup] Connecting directly to PostgreSQL: %s:%s", dbHost, dbPort)
 	}
