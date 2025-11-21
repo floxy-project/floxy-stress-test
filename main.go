@@ -180,19 +180,19 @@ func main() {
 	failpointInjector := injectors.FailpointPanic(failpointNames, 0.03, 500*time.Millisecond)
 
 	// 3. ToxiProxy injectors for database network chaos
-	var latencyInjector *injectors.ToxiProxyLatencyInjector
+	//var latencyInjector *injectors.ToxiProxyLatencyInjector
 	var bandwidthInjector *injectors.ToxiProxyBandwidthInjector
-	var timeoutInjector *injectors.ToxiProxyTimeoutInjector
+	//var timeoutInjector *injectors.ToxiProxyTimeoutInjector
 
 	if useToxiProxy && toxiproxyClient != nil {
 		// Latency for database calls
 		// Proxy name "pg" matches the name in toxiproxy.json
-		latencyInjector = injectors.ToxiProxyLatency(
-			toxiproxyClient,
-			"pg",
-			100*time.Millisecond, // 100ms latency
-			20*time.Millisecond,  // ±20ms jitter
-		)
+		//latencyInjector = injectors.ToxiProxyLatency(
+		//	toxiproxyClient,
+		//	"pg",
+		//	40*time.Millisecond, // latency
+		//	5*time.Millisecond,  // jitter
+		//)
 
 		// Bandwidth limiting (simulates slow network)
 		bandwidthInjector = injectors.ToxiProxyBandwidth(
@@ -202,11 +202,11 @@ func main() {
 		)
 
 		// Connection timeouts
-		timeoutInjector = injectors.ToxiProxyTimeout(
-			toxiproxyClient,
-			"pg",
-			2*time.Second, // 2 second timeout
-		)
+		//timeoutInjector = injectors.ToxiProxyTimeout(
+		//	toxiproxyClient,
+		//	"pg",
+		//	200*time.Millisecond,
+		//)
 	}
 
 	// Create ChaosKit scenario
@@ -234,11 +234,11 @@ func main() {
 	}
 
 	// ToxiProxy injectors (conditional)
-	if useToxiProxy && latencyInjector != nil {
+	if useToxiProxy && bandwidthInjector != nil {
 		scenarioBuilder = scenarioBuilder.
-			Inject("db-latency", latencyInjector).
-			Inject("db-bandwidth", bandwidthInjector).
-			Inject("db-timeout", timeoutInjector)
+			//Inject("db-latency", latencyInjector).
+			Inject("db-bandwidth", bandwidthInjector)
+		//Inject("db-timeout", timeoutInjector)
 		log.Println("[Setup] ToxiProxy injectors enabled")
 	}
 
