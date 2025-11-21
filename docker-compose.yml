@@ -33,7 +33,7 @@ services:
       - ./toxiproxy.json:/config/toxiproxy.json
     command: -host=0.0.0.0 -config /config/toxiproxy.json
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8474/proxies"]
+      test: ["CMD", "/toxiproxy-cli", "list"]
       interval: 2s
       timeout: 2s
       retries: 10
