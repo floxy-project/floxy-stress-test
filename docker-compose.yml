@@ -31,7 +31,13 @@ services:
       - "6432:6432"
     volumes:
       - ./toxiproxy.json:/config/toxiproxy.json
-    command: -config /config/toxiproxy.json
+    command: -host=0.0.0.0 -config /config/toxiproxy.json
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8474/proxies"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
     depends_on:
       floxy-stress-pg:
         condition: service_healthy
@@ -54,7 +60,7 @@ services:
       REPEAT: 1
     depends_on:
       floxy-stress-toxiproxy:
-        condition: service_started
+        condition: service_healthy
       floxy-stress-pg:
         condition: service_healthy
 
