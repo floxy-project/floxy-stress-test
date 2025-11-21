@@ -5,8 +5,8 @@ go 1.25
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/rom8726/chaoskit v0.6.0
-	github.com/rom8726/floxy v1.14.6
+	github.com/rom8726/chaoskit v0.7.1
+	github.com/rom8726/floxy v1.15.1
 	golang.org/x/sync v0.18.0
 )
 

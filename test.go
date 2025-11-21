@@ -22,7 +22,9 @@ import (
 // FloxyStressTarget wraps Floxy engine as a ChaosKit target
 type FloxyStressTarget struct {
 	pool              *pgxpool.Pool
+	poolDirect        *pgxpool.Pool
 	engine            *floxy.Engine
+	engineDirect      *floxy.Engine
 	rollbackPlugin    *rolldepth.RollbackDepthPlugin
 	metricsCollector  *FloxyMetricsCollector
 	workflowInstances atomic.Int64
@@ -33,21 +35,18 @@ type FloxyStressTarget struct {
 	mu                sync.RWMutex
 }
 
-func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarget, error) {
+func NewFloxyStressTarget(directConnString, proxyConnString string) (*FloxyStressTarget, error) {
 	ctx := context.Background()
 
-	poolMigrations, err := pgxpool.New(ctx, connString)
+	poolDirect, err := pgxpool.New(ctx, directConnString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
 
 	log.Println("[Floxy] Running migrations...")
-	if err := floxy.RunMigrations(ctx, poolMigrations); err != nil {
-		poolMigrations.Close()
-
+	if err := floxy.RunMigrations(ctx, poolDirect); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
-	poolMigrations.Close()
 	log.Println("[Floxy] Migrations completed")
 
 	pool, err := pgxpool.New(ctx, proxyConnString)
@@ -69,9 +68,13 @@ func NewFloxyStressTarget(connString, proxyConnString string) (*FloxyStressTarge
 	metricsPlugin := metrics.New(metricsCollector)
 	engine.RegisterPlugin(metricsPlugin)
 
+	engineDirect := floxy.NewEngine(poolDirect)
+
 	target := &FloxyStressTarget{
 		pool:             pool,
+		poolDirect:       poolDirect,
 		engine:           engine,
+		engineDirect:     engineDirect,
 		rollbackPlugin:   rollbackPlugin,
 		metricsCollector: metricsCollector,
 	}
@@ -95,9 +98,11 @@ func (t *FloxyStressTarget) Teardown(ctx context.Context) error {
 
 	// Shutdown engine
 	_ = t.engine.Shutdown()
+	_ = t.engineDirect.Shutdown()
 
 	// Close pool
 	t.pool.Close()
+	t.poolDirect.Close()
 
 	// Print final stats
 	stats := t.GetStats()
@@ -156,7 +161,7 @@ func (t *FloxyStressTarget) registerWorkflows(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to build %s: %w", wf.name, err)
 		}
-		if err := t.engine.RegisterWorkflow(ctx, workflow); err != nil {
+		if err := t.engineDirect.RegisterWorkflow(ctx, workflow); err != nil {
 			return fmt.Errorf("failed to register %s: %w", wf.name, err)
 		}
 	}
@@ -256,7 +261,7 @@ func (t *FloxyStressTarget) ExecuteRandomWorkflow(ctx context.Context) error {
 
 	input, _ := json.Marshal(order)
 
-	instanceID, err := t.engine.Start(ctx, workflowID, input)
+	instanceID, err := t.engineDirect.Start(ctx, workflowID, input)
 	if err != nil {
 		return fmt.Errorf("failed to start workflow: %w", err)
 	}
@@ -283,7 +288,7 @@ func (t *FloxyStressTarget) ExecuteRandomWorkflow(ctx context.Context) error {
 			default:
 			}
 
-			status, err := t.engine.GetStatus(context.Background(), instanceID)
+			status, err := t.engineDirect.GetStatus(context.Background(), instanceID)
 			if err != nil {
 				log.Printf("failed to get status: %s", err)
 
@@ -619,8 +624,10 @@ func RegisterWorkflows(connString string) error {
 	)
 
 	target := &FloxyStressTarget{
-		pool:   pool,
-		engine: engine,
+		pool:         pool,
+		poolDirect:   pool,
+		engine:       engine,
+		engineDirect: engine,
 	}
 
 	// Register workflows

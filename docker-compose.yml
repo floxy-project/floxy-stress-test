@@ -53,11 +53,11 @@ services:
       DB_NAME: floxy
       DB_USER: floxy
       DB_PASSWORD: password
-      USE_TOXIPROXY: true
+      USE_TOXIPROXY: false
       TOXIPROXY_HOST: floxy-stress-toxiproxy
       TOXIPROXY_API_PORT: 8474
       TOXIPROXY_PORT: 6432
-      REPEAT: 1
+      REPEAT: 100
     depends_on:
       floxy-stress-toxiproxy:
         condition: service_healthy
