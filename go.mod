@@ -5,8 +5,8 @@ go 1.25
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/rom8726/chaoskit v0.7.1
-	github.com/rom8726/floxy v1.15.1
+	github.com/rom8726/chaoskit v0.9.0
+	github.com/rom8726/floxy v1.16.2
 	golang.org/x/sync v0.18.0
 )
 
@@ -35,6 +35,7 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect

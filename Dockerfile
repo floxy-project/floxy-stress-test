@@ -11,7 +11,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
-    -tags failpoint -gcflags=all=-l \
+    -tags=failpoint,chaos -gcflags=all=-l \
     -o stress-test \
     .
 
