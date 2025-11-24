@@ -1,10 +1,10 @@
 # Floxy Stress Test with ChaosKit
 
-Comprehensive stress testing for Floxy workflow engine using ChaosKit framework.
+Comprehensive stress testing for Floxy workflow engine using [ChaosKit framework](https://github.com/rom8726/chaoskit).
 
 ## Overview
 
-This example demonstrates how to use ChaosKit to perform reliability testing on the Floxy saga-based workflow engine.
+This example demonstrates how to use [ChaosKit](https://github.com/rom8726/chaoskit) to perform reliability testing on the Floxy saga-based workflow engine.
 It tests various workflow patterns under chaos conditions to validate:
 
 - Rollback recursion depth limits
@@ -370,6 +370,12 @@ A healthy Floxy engine should show:
 - No infinite loops
 - Proper compensation execution
 - Consistent state after rollback
+
+## Real test executions
+
+### 2025-11-20
+
+<img width="1410" height="673" alt="floxy_stress_test_2025_11_20" src="https://github.com/user-attachments/assets/7b5335ac-4895-4073-b24e-3519d4b34513" />
 
 ## Development
 
